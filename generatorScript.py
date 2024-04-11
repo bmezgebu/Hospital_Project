@@ -27,7 +27,7 @@ def pdf_extractor(pdf_path):
 
 trainingMaterials = pdf_extractor(pdf_path1)
 
-# Extract Sample Conversations (provided by Education Professor) from PDF - used to model synthetic conversations
+# Extract Sample Conversations from PDF - used to model synthetic conversations
 pdf_path2 = 'sampleHCPtoPatientConversations.pdf'
 sampleConversations = pdf_extractor(pdf_path2)
 
@@ -45,7 +45,7 @@ def generate_conversation(max_retries = 3):
         HCP: The Health Care Professional in this conversation should be a {HCP}.
         Patient Representative: The Patient Representative in this conversation should be the patient's {patientRepresentative}.
         Surgical Procedure: The manner of expression in the conversation should be {surgicalProcedure}.
-        Questions: As demonstrated in the sample conversations, after the PCP provides instructions, they may ask a few questions to check Patient Representative's of the instructions they are being given. In this conversation, {knowledgeCheck}.
+        Questions: As demonstrated in the sample conversations, after the PCP provides instructions, they may ask a few questions to check Patient Representative's of the instructions they are being given. In this conversation, {knowledgeCheck}. The PCP should ask the questions at the end of the conversation. 
         PCP: The Primary Care Physician should have a {tone} tone.
         Patient Representative: The patient representative should work with the PCP by taking instructions, answering questions, and being focused while the PCP provides post-operative care instructions. 
         Now generate the conversation, which should be as long as possible, starting with the PCP's first message which should include them introducing themselves and the purpose of the conversation in a format similar (but not identical) to this: 
@@ -81,27 +81,35 @@ def generate_conversation(max_retries = 3):
 def process_file(output_file):
     start_time = time.time()
 
-    # Open the file in 'a' mode
-    with open(output_file, 'a') as out_file:
-        # Create a ThreadPoolExecutor
-        with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
-            # Create a dictionary to store the Future objects
-            future_to_data = {executor.submit(generate_conversation): None for _ in range(5)}
+    # Open the file in write mode initially to create the file or overwrite an existing one
+    with open(output_file, 'w') as out_file:
+        out_file.write('[')  # Start the JSON array
 
-            for future in concurrent.futures.as_completed(future_to_data):
+    with open(output_file, 'a') as out_file:
+        with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
+            # Submit 5 tasks to the executor
+            futures = [executor.submit(generate_conversation) for _ in range(5)]
+            results = []
+
+            for i, future in enumerate(concurrent.futures.as_completed(futures)):
                 try:
                     data = future.result()
+                    results.append(data)
                 except Exception as exc:
                     print('Generated an exception: %s' % exc)
-                else:
-                    # Write the new conversation to the output file
-                    out_file.write(json.dumps(data))
-                    out_file.write('\n')  # JSONL files have one record per line
-                    out_file.flush()
+
+            # Write results to the file, handling commas correctly
+            for i, data in enumerate(results):
+                json_data = json.dumps(data)
+                if i != 0:  # Add a comma before each object except the first
+                    out_file.write(',')
+                out_file.write(json_data)
+
+        out_file.write(']')  # Close the JSON array
 
     end_time = time.time()
-
     print("Time taken: {} seconds".format(end_time - start_time))
+
 
 HCP_list = ["Doctor", "Nurse"]
 
@@ -115,9 +123,9 @@ def knowledgeCheckGenerator():
     if numQuestions == 1:
         return "the PCP asks one question. The Patient Representative answers the question correctly."
     elif numQuestions == 2:
-        return "the PCP asks one question. The Patient Representative answers the first question incorrectly, then answers the second question correctly."
+        return "the PCP asks two questions. The Patient Representative answers the first question incorrectly, then answers the second question correctly."
     else:
-        return "the PCP asks one question. The Patient Representative answers the first two question incorrectly, then answers the third question correctly."
+        return "the PCP asks three question. The Patient Representative answers the first two question incorrectly, then answers the third question correctly."
     
 # Choose the tone of the HCP. 
 # 0.6 probability of a 'professional, empathetic, informative' tone. 
@@ -127,6 +135,6 @@ def toneRandomizer():
     tones = ['professional, empathetic, informative', 'professional, empathetic, informative', 'professional, empathetic, informative', 'professional, empathetic, informative', 'professional, empathetic, informative', 'professional, empathetic, informative', 'semi-professional, neutral', 'semi-professional, neutral', 'semi-professional, neutral','unprofessional, somewhat disrespectful, rushed']
     return random.choice(tones)
 
-output_file_path = '/Users/bereketdaniel/Desktop/Research Project/local_run/conversationGenerationInitialTesting/test1.json'
+output_file_path = '/Users/bereketdaniel/Desktop/Research Project/local_run/conversationGenerationInitialTesting/test2.json'
 
 process_file(output_file_path)
