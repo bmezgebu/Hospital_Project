@@ -9,36 +9,29 @@ import random
 from dotenv import load_dotenv
 
 # API Setup
-load_dotenv('/Users/bereketdaniel/Desktop/Research Project/local_run/Hospital_Project/notes.env')  
+load_dotenv('/Users/bereketdaniel/Desktop/Research/local_run/Hospital_Project/notes.env')  
 api_key = os.getenv("API_KEY")
 openai.api_key = api_key
 
 # Extract training material from PDF
-pdf_path1 = 'Training_Info_Full_Length.pdf'
-
 def pdf_extractor(pdf_path):
     with open(pdf_path, 'rb') as file:
         reader = PyPDF2.PdfReader(file)
         text = ""
-        for i in range(len(reader.pages)):
-            page = reader.pages[i]
+        for page in reader.pages:
             text += page.extract_text()
     return text
 
-trainingMaterials = pdf_extractor(pdf_path1)
+trainingMaterials = pdf_extractor('HospitalProjectFeedbackTrainingMaterials.pdf')
+sampleConversations = pdf_extractor('sampleHCPtoPatientConversations.pdf')
 
-# Extract Sample Conversations from PDF - used to model synthetic conversations
-pdf_path2 = 'sampleHCPtoPatientConversations.pdf'
-sampleConversations = pdf_extractor(pdf_path2)
-
-prompt1 = "The following data is guidelines and information on post-operative care instruction best practices. Analyze this in preparation for the next prompt. Do not respond to this information with a summary or analysis; just analyse and retain it in preparation for the next prompt:" + trainingMaterials
-
-def generate_conversation(max_retries = 3):
+def generate_conversation(max_retries=3):
     HCP = random.choice(HCP_list)
     patientRepresentative = random.choice(patientRepresentative_list)
     surgicalProcedure = random.choice(surgicalProcedure_list)
     knowledgeCheck = knowledgeCheckGenerator()
     tone = toneRandomizer()
+
     messages = [
         {"role": "system", "content": f"""You are a Health Care Professional (HCP) to Patient Representative (such as the patient's family member, friend, or spouse) conversation generator with the topic of conversation being post-operative care procedures for a patient. Your task is to generate a single one of conversation that is as long as possible, based on parameters, sample conversations, and other training material you will be given. Do not stop writing until it is impossible to continue."""},
         {"role": "user", "content": f"""Generate a single conversation between a Health Care Provider (HCP) and Patient Representative (such as the patient's family member, friend, or spouse) with the following specifications:
@@ -55,10 +48,37 @@ def generate_conversation(max_retries = 3):
 
     for attempt in range(max_retries):
         try:
+            # Generate the first conversation
             response = openai.ChatCompletion.create(
-                model="gpt-4-0125-preview",
+                model="gpt-4-turbo",
                 messages=messages,
             )
+            conversation_part1 = response['choices'][0]['message']['content']
+
+            # Feedback prompt
+            feedbackPrompt = (
+                f"Please provide a detailed critical analysis of the Health Care Professional's (HCP) performance in the following conversation, "
+                f"especially in light of the five key communication principles outlined in the training materials. These principles are: "
+                f"1) Be welcoming to foster a comfortable dialogue environment, "
+                f"2) Avoid jargon to ensure clear communication, "
+                f"3) Stick to main points to maintain focus, "
+                f"4) Ask teach-back questions to confirm understanding, and "
+                f"5) Act in a manner that encourages the patient's representative to ask questions. "
+                f"Review the training materials provided and the conversation below, then critically assess how well the HCP adhered to these principles. Cite examples from the conversation as support for each piece of feedback."
+                f"Highlight both strengths and areas for improvement. Use specific examples from the conversation to support your points. \n\n"
+                f"Training Materials: {trainingMaterials}\n\n"
+                f"Conversation: {conversation_part1}"
+            )
+
+            messages.append({"role": "user", "content": feedbackPrompt})
+
+            # Continue the conversation
+            response = openai.ChatCompletion.create(
+                model="gpt-4-turbo",
+                messages=messages,
+            )
+            conversation_part2 = response['choices'][0]['message']['content']
+
             return {
                 "parameters": {
                     "HCP": HCP,
@@ -67,7 +87,8 @@ def generate_conversation(max_retries = 3):
                     "knowledgeCheck": knowledgeCheck,
                     "tone": tone
                 },
-                "conversation": response['choices'][0]['message']['content']
+                "conversation_part1": conversation_part1,
+                "conversation_part2": conversation_part2
             }
 
         except openai.error.OpenAIError as e:
@@ -77,10 +98,26 @@ def generate_conversation(max_retries = 3):
     print(f'Failed after {max_retries} attempts')
     return None
 
+# Definitions for conversation generation
+HCP_list = ["Doctor", "Nurse"]
+patientRepresentative_list = ["Parent", "Spouse", "Sibling", "Friend"]
+surgicalProcedure_list = ["Cataract Surgery", "Arthroscopic Surgery", "Tonsillectomy", "Hernia Repair", "Gallbladder Removal", "Carpal Tunnel Release", "Laser Eye Surgery", "Varicose Vein Treatment", "Endoscopic Sinus Surgery", "Skin Lesion Removals", "Breast Biopsy", "Ear Tube Placement", "Laparoscopic Sterilization", "Wisdom Teeth Extraction", "Appendectomy"]
+
+def knowledgeCheckGenerator():
+    numQuestions = random.choice([1, 2, 3])
+    responses = {
+        1: "the PCP asks one question, which is answered correctly by the Patient Representative.",
+        2: "the PCP asks two questions; the first is answered incorrectly, the second correctly.",
+        3: "the PCP asks three questions; the first two are answered incorrectly, the last correctly."
+    }
+    return responses[numQuestions]
+
+def toneRandomizer():
+    tones = ['professional, empathetic, informative', 'professional, empathetic, informative', 'professional, empathetic, informative', 'professional, empathetic, informative', 'professional, empathetic, informative', 'professional, empathetic, informative', 'semi-professional, neutral', 'semi-professional, neutral', 'semi-professional, neutral','unprofessional, somewhat disrespectful, rushed']
+    return random.choice(tones)
 
 def process_file(output_file):
     start_time = time.time()
-
     # Open the file in write mode initially to create the file or overwrite an existing one
     with open(output_file, 'w') as out_file:
         out_file.write('[')  # Start the JSON array
@@ -110,31 +147,6 @@ def process_file(output_file):
     end_time = time.time()
     print("Time taken: {} seconds".format(end_time - start_time))
 
-
-HCP_list = ["Doctor", "Nurse"]
-
-patientRepresentative_list = ["Parent", "Spouse", "Sibling", "Friend"]
-
-surgicalProcedure_list = ["Cataract Surgery", "Arthroscopic Surgery", "Tonsillectomy", "Hernia Repair", "Gallbladder Removal", "Carpal Tunnel Release", "Laser Eye Surgery", "Varicose Vein Treatment", "Endoscopic Sinus Surgery", "Skin Lesion Removals", "Breast Biopsy", "Ear Tube Placement", "Laparoscopic Sterilization", "Wisdom Teeth Extraction", "Appendectomy"]
-
-# Randomly decide how many questions the PCP asks, how many of those questions the patient representative answers correctly, and whether the PCP reponds appropriately
-def knowledgeCheckGenerator():
-    numQuestions = random.choice([1,2,3])
-    if numQuestions == 1:
-        return "the PCP asks one question. The Patient Representative answers the question correctly."
-    elif numQuestions == 2:
-        return "the PCP asks two questions. The Patient Representative answers the first question incorrectly, then answers the second question correctly."
-    else:
-        return "the PCP asks three question. The Patient Representative answers the first two question incorrectly, then answers the third question correctly."
-    
-# Choose the tone of the HCP. 
-# 0.6 probability of a 'professional, empathetic, informative' tone. 
-# 0.3 probability of a 'semi-professional, neutral' tone. 
-# 0.1 probability of a 'unprofessional, somewhat disrespectful, rushed' tone.
-def toneRandomizer():
-    tones = ['professional, empathetic, informative', 'professional, empathetic, informative', 'professional, empathetic, informative', 'professional, empathetic, informative', 'professional, empathetic, informative', 'professional, empathetic, informative', 'semi-professional, neutral', 'semi-professional, neutral', 'semi-professional, neutral','unprofessional, somewhat disrespectful, rushed']
-    return random.choice(tones)
-
-output_file_path = '/Users/bereketdaniel/Desktop/Research Project/local_run/conversationGenerationInitialTesting/test2.json'
-
+output_file_path = '/Users/bereketdaniel/Desktop/Research/local_run/conversationGenerationInitialTesting/test3.json'
 process_file(output_file_path)
+
